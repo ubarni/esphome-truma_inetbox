@@ -58,32 +58,23 @@ void LinBusListener::setup_framework() {
   }
 }
 
-void LinBusListener::uartEventTask_(void *args) {
-  LinBusListener *instance = (LinBusListener *) args;
-  auto uartComp = static_cast<ESPHOME_UART *>(instance->parent_);
-  auto uart_num = uartComp->get_hw_serial_number();
-  //auto uartEventQueue = uartComp->get_uart_event_queue();
-  // Neu für Arduino 3.0+:
-  QueueHandle_t uartEventQueue;
-  uart_get_buffered_data_len(uartComp->get_hw_serial_port(), (size_t*)&uartEventQueue); 
-  // Hinweis: Je nach genauer Implementierung im Fork muss hier 
-  // ggf. der direkte ESP-IDF Call genutzt werden.
-  uart_event_t event;
-  for (;;) {
-    // Waiting for UART event.
-    if (xQueueReceive(*uartEventQueue, (void *) &event, QUEUE_WAIT_BLOCKING)) {
-      if (event.type == UART_DATA && instance->available() > 0) {
-        instance->onReceive_();
-      } else if (event.type == UART_BREAK) {
-        // If the break is valid the `onReceive` is called first and the break is handeld. Therfore the expectation is
-        // that the state should be in waiting for `SYNC`.
-        if (instance->current_state_ != READ_STATE_SYNC) {
-          instance->current_state_ = READ_STATE_BREAK;
-        }
+void LinBusListener::uartEventTask_(void *pvParameters) {
+  LinBusListener *self = (LinBusListener *)pvParameters;
+  auto *uartComp = self->parent_->get_uart_parent();
+  
+  // Wir lesen jetzt direkt, solange Daten im Buffer sind, 
+  // anstatt auf ein Queue-Event zu warten, das in Arduino 3.0 gesperrt ist.
+  while (true) {
+    size_t available = uartComp->available();
+    if (available > 0) {
+      uint8_t data;
+      while (uartComp->read_byte(&data)) {
+        self->handle_char_(data);
       }
     }
+    // Kurze Pause, um den Watchdog nicht zu triggern (1ms)
+    delay(1); 
   }
-  vTaskDelete(NULL);
 }
 
 void LinBusListener::eventTask_(void *args) {
