@@ -60,20 +60,36 @@ void LinBusListener::setup_framework() {
 
 void LinBusListener::uartEventTask_(void *pvParameters) {
   LinBusListener *self = (LinBusListener *)pvParameters;
-  auto *uartComp = self->parent_->get_uart_parent();
+  // Cast auf IDFUARTComponent, um auf Hardware-Funktionen zuzugreifen
+  auto *uartComp = (esphome::uart::IDFUARTComponent *)self->parent_->get_uart_parent();
+  uart_port_t uart_num = (uart_port_t)uartComp->get_hw_serial_number();
   
-  // Wir lesen jetzt direkt, solange Daten im Buffer sind, 
-  // anstatt auf ein Queue-Event zu warten, das in Arduino 3.0 gesperrt ist.
+  uart_event_t event;
   while (true) {
-    size_t available = uartComp->available();
-    if (available > 0) {
-      uint8_t data;
-      while (uartComp->read_byte(&data)) {
-        self->handle_char_(data);
+    // Wir warten blockierend auf ein Event aus der Hardware-Queue
+    // 'self->uart_event_queue_' muss in deiner Klasse definiert sein
+    if (xQueueReceive(self->uart_event_queue_, (void *)&event, (TickType_t)portMAX_DELAY)) {
+      switch (event.type) {
+        case UART_DATA:
+          // Normale Daten empfangen
+          while (uartComp->available()) {
+            uint8_t data;
+            if (uartComp->read_byte(&data)) {
+              self->handle_char_(data);
+            }
+          }
+          break;
+
+        case UART_BREAK:
+          // WICHTIG: LinBus Break erkannt!
+          // Hier rufst du die Methode auf, die den Frame-Status zurücksetzt
+          self->handle_break_(); 
+          break;
+
+        default:
+          break;
       }
     }
-    // Kurze Pause, um den Watchdog nicht zu triggern (1ms)
-    delay(1); 
   }
 }
 
