@@ -60,30 +60,19 @@ void LinBusListener::setup_framework() {
 
 void LinBusListener::uartEventTask_(void *args) {
   LinBusListener *instance = (LinBusListener *) args;
-  auto uartComp = static_cast<ESPHOME_UART *>(instance->parent_);
   
-  // Hardware Serial Number abrufen
-  auto uart_num = uartComp->get_hw_serial_number();
-  
-  // Queue Handle abrufen (das ist bereits ein Pointer!)
-  auto uartEventQueue = uartComp->get_uart_event_queue();
-  
-  uart_event_t event;
   for (;;) {
-    // WARTEN AUF UART EVENT - HIER WURDE DAS * ENTFERNT
-    if (xQueueReceive(uartEventQueue, (void *) &event, QUEUE_WAIT_BLOCKING)) {
-      
-      if (event.type == UART_DATA && instance->available() > 0) {
-        instance->onReceive_();
-      } else if (event.type == UART_BREAK) {
-        // Wenn ein Break erkannt wird (wichtig für LIN-Bus Synchronisation)
-        if (instance->current_state_ != READ_STATE_SYNC) {
-          instance->current_state_ = READ_STATE_BREAK;
-        }
-      }
-      
+    // Prüfen, ob Daten im Puffer liegen
+    if (instance->available() > 0) {
+      instance->onReceive_();
     }
+    
+    // Da ESPHome uns keine Hardware-Queue mehr gibt, die den Task blockiert,
+    // müssen wir manuell eine winzige Pause einlegen. 
+    // pdMS_TO_TICKS(2) ist sauberer als delay(1) und füttert den FreeRTOS Watchdog.
+    vTaskDelay(pdMS_TO_TICKS(2));
   }
+  
   vTaskDelete(NULL);
 }
 
