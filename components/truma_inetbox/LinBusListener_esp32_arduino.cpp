@@ -58,39 +58,33 @@ void LinBusListener::setup_framework() {
   }
 }
 
-void LinBusListener::uartEventTask_(void *pvParameters) {
-  LinBusListener *self = (LinBusListener *)pvParameters;
-  // Cast auf IDFUARTComponent, um auf Hardware-Funktionen zuzugreifen
-  auto *uartComp = (esphome::uart::IDFUARTComponent *)self->parent_->get_uart_parent();
-  uart_port_t uart_num = (uart_port_t)uartComp->get_hw_serial_number();
+void LinBusListener::uartEventTask_(void *args) {
+  LinBusListener *instance = (LinBusListener *) args;
+  auto uartComp = static_cast<ESPHOME_UART *>(instance->parent_);
+  
+  // Hardware Serial Number abrufen
+  auto uart_num = uartComp->get_hw_serial_number();
+  
+  // Queue Handle abrufen (das ist bereits ein Pointer!)
+  auto uartEventQueue = uartComp->get_uart_event_queue();
   
   uart_event_t event;
-  while (true) {
-    // Wir warten blockierend auf ein Event aus der Hardware-Queue
-    // 'self->uart_event_queue_' muss in deiner Klasse definiert sein
-    if (xQueueReceive(self->uart_event_queue_, (void *)&event, (TickType_t)portMAX_DELAY)) {
-      switch (event.type) {
-        case UART_DATA:
-          // Normale Daten empfangen
-          while (uartComp->available()) {
-            uint8_t data;
-            if (uartComp->read_byte(&data)) {
-              self->handle_char_(data);
-            }
-          }
-          break;
-
-        case UART_BREAK:
-          // WICHTIG: LinBus Break erkannt!
-          // Hier rufst du die Methode auf, die den Frame-Status zurücksetzt
-          self->handle_break_(); 
-          break;
-
-        default:
-          break;
+  for (;;) {
+    // WARTEN AUF UART EVENT - HIER WURDE DAS * ENTFERNT
+    if (xQueueReceive(uartEventQueue, (void *) &event, QUEUE_WAIT_BLOCKING)) {
+      
+      if (event.type == UART_DATA && instance->available() > 0) {
+        instance->onReceive_();
+      } else if (event.type == UART_BREAK) {
+        // Wenn ein Break erkannt wird (wichtig für LIN-Bus Synchronisation)
+        if (instance->current_state_ != READ_STATE_SYNC) {
+          instance->current_state_ = READ_STATE_BREAK;
+        }
       }
+      
     }
   }
+  vTaskDelete(NULL);
 }
 
 void LinBusListener::eventTask_(void *args) {
