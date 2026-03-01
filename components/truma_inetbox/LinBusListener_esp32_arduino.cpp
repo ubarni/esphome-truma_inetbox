@@ -61,16 +61,19 @@ void LinBusListener::setup_framework() {
 void LinBusListener::uartEventTask_(void *args) {
   LinBusListener *instance = (LinBusListener *) args;
   
+  // 1. WICHTIG: Wir warten 2 Sekunden (2000 ms), bevor der Task überhaupt anfängt!
+  // So hat ESPHome genug Zeit, den UART-Port und das WLAN in Ruhe hochzufahren.
+  vTaskDelay(pdMS_TO_TICKS(2000));
+  
   for (;;) {
-    // Prüfen, ob Daten im Puffer liegen
-    if (instance->available() > 0) {
+    // 2. Sicherheits-Check: Nur abfragen, wenn die Instanz wirklich existiert
+    if (instance != nullptr && instance->available() > 0) {
       instance->onReceive_();
     }
     
-    // Da ESPHome uns keine Hardware-Queue mehr gibt, die den Task blockiert,
-    // müssen wir manuell eine winzige Pause einlegen. 
-    // pdMS_TO_TICKS(2) ist sauberer als delay(1) und füttert den FreeRTOS Watchdog.
-    vTaskDelay(pdMS_TO_TICKS(2));
+    // 3. Atempause für den Watchdog (10 Millisekunden statt 2). 
+    // Das ist für den LIN-Bus schnell genug, aber entlastet die CPU massiv.
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
   
   vTaskDelete(NULL);
